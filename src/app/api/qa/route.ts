@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { embedTexts, openai } from "@/lib/openai";
 import { retrieveTopChunks } from "@/lib/retrieval";
-import { getSession, setSession } from "@/lib/sessionStore";
+import { getSession  } from "@/lib/sessionStore";
 export const runtime = "nodejs";
 
 export async function POST(req: Request) {
@@ -21,6 +21,16 @@ export async function POST(req: Request) {
   if (!doc) {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
+
+if (!doc.text || !doc.chunks || doc.chunks.length === 0) {
+  return NextResponse.json(
+    { error: "Session missing document text/chunks" },
+    { status: 404 }
+  );
+}
+
+
+
 
   // 1) Embed the question
   const [qEmbedding] = await embedTexts([question]);

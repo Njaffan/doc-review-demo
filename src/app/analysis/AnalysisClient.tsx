@@ -35,7 +35,7 @@ export default function AnalysisClient() {
       return;
     }
 
-    const fd = new FormData();
+    const fd = new FormData(); 
     fd.append("file", file);
 
     const res = await fetch("/api/upload", { method: "POST", body: fd });

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { generateIdentifiedIssues } from "@/lib/openai";
-import { getSession, setSession } from "@/lib/sessionStore";
+import { getSession } from "@/lib/sessionStore";
+
 export const runtime = "nodejs";
 
 export async function POST(req: Request) {
@@ -13,16 +14,22 @@ export async function POST(req: Request) {
     }
 
     const doc = getSession(session);
-    if (!doc) {
+
+    // Guard: must exist + must have extracted text
+    if (!doc || !doc.text) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
 
     const issues = await generateIdentifiedIssues(doc.text);
 
-    return NextResponse.json({ session, issues });
+    return NextResponse.json({
+      session,
+      issues,
+      filename: doc.fileName ?? null,
+    });
   } catch (err: any) {
     return NextResponse.json(
-      { error: err?.message || "Issues generation failed" },
+      { error: err?.message || "Issues failed", details: String(err) },
       { status: 500 }
     );
   }

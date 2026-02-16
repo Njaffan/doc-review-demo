@@ -1,9 +1,22 @@
+
 // src/lib/sessionStore.ts
+export type StoredChunk = {
+  id: string;
+  start: number;
+  end: number;
+  text: string;
+  embedding: number[];
+};
+
 export type SessionData = {
   fileName?: string;
   text?: string;
+  chunks?: StoredChunk[];
   createdAt: number;
 };
+
+
+
 
 declare global {
   // eslint-disable-next-line no-var

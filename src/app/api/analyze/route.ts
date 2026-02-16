@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { generateExecutiveSummary } from "@/lib/openai";
-import { getSession, setSession } from "@/lib/sessionStore";
-export const runtime = "nodejs";
+import { getSession } from "@/lib/sessionStore";
 
+export const runtime = "nodejs";
 
 export async function POST(req: Request) {
   try {
@@ -14,7 +14,7 @@ export async function POST(req: Request) {
     }
 
     const doc = getSession(session);
-    if (!doc) {
+    if (!doc || !doc.text) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
 
@@ -22,7 +22,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       session,
-      filename: doc.filename,
+      filename: doc.fileName ?? null, // ✅ correct property name
       summary,
     });
   } catch (err: any) {

@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import { extractDocxText } from "@/lib/textExtract";
 import { chunkText } from "@/lib/chunking";
 import { embedTexts } from "@/lib/openai";
-import { getSession, setSession } from "@/lib/sessionStore";
-export const runtime = "nodejs";
+import { setSession } from "@/lib/sessionStore";
 
+export const runtime = "nodejs";
 
 export async function POST(req: Request) {
   const formData = await req.formData();
@@ -41,12 +41,9 @@ export async function POST(req: Request) {
   }));
 
   setSession(session, {
-    filename: file.name,
-    mimeType:
-      file.type ||
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    fileName: file.name,      // ✅ fix: defined
     text,
-    chunks: storedChunks,
+    chunks: storedChunks,     // ✅ fix: store embedded chunks
     createdAt: Date.now(),
   });
 
