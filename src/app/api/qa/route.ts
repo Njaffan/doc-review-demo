@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
-import { getSession } from "@/lib/sessionStore";
 import { embedTexts, openai } from "@/lib/openai";
 import { retrieveTopChunks } from "@/lib/retrieval";
+import { getSession, setSession } from "@/lib/sessionStore";
+export const runtime = "nodejs";
 
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));

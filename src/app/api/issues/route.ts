@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { getSession } from "@/lib/sessionStore";
 import { generateIdentifiedIssues } from "@/lib/openai";
+import { getSession, setSession } from "@/lib/sessionStore";
+export const runtime = "nodejs";
 
 export async function POST(req: Request) {
   try {

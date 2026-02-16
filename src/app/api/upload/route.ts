@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
-import { setSession } from "@/lib/sessionStore";
 import { extractDocxText } from "@/lib/textExtract";
 import { chunkText } from "@/lib/chunking";
 import { embedTexts } from "@/lib/openai";
+import { getSession, setSession } from "@/lib/sessionStore";
+export const runtime = "nodejs";
+
 
 export async function POST(req: Request) {
   const formData = await req.formData();
