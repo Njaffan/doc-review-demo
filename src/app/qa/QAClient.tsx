@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import Image from "next/image";
 
 type ChatMsg = {
   role: "user" | "assistant";
@@ -19,7 +20,6 @@ export default function QAClient() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Optional: reset chat when session changes
   useEffect(() => {
     setMessages([]);
     setError(null);
@@ -37,7 +37,6 @@ export default function QAClient() {
     setError(null);
     setLoading(true);
 
-    // Optimistic add user message
     const userMsg: ChatMsg = { role: "user", content: q, ts: Date.now() };
     setMessages((prev) => [...prev, userMsg]);
     setQuestion("");
@@ -46,14 +45,12 @@ export default function QAClient() {
       const res = await fetch("/api/qa", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // IMPORTANT: this must match what your /api/qa expects
         body: JSON.stringify({ session, question: q }),
       });
 
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || "Q&A request failed");
 
-      // Accept several possible field names to reduce brittleness
       const answer =
         (typeof data?.answer === "string" && data.answer) ||
         (typeof data?.response === "string" && data.response) ||
@@ -66,7 +63,11 @@ export default function QAClient() {
         );
       }
 
-      const botMsg: ChatMsg = { role: "assistant", content: answer.trim(), ts: Date.now() };
+      const botMsg: ChatMsg = {
+        role: "assistant",
+        content: answer.trim(),
+        ts: Date.now(),
+      };
       setMessages((prev) => [...prev, botMsg]);
     } catch (e: any) {
       setError(e?.message || "Something went wrong.");
@@ -76,7 +77,6 @@ export default function QAClient() {
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    // Enter to send, Shift+Enter for newline
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       if (!loading) ask();
@@ -93,12 +93,22 @@ export default function QAClient() {
           ← Back to Analysis
         </a>
 
+        {/* ✅ Avatar goes INSIDE the return */}
+        <div className="mt-6 flex flex-col items-center">
+          <Image
+            src="/avatar.png"
+            alt="Avatar"
+            width={90}
+            height={90}
+            className="rounded-full shadow-md"
+            priority
+          />
+        </div>
+
         <h1 className="mt-6 text-3xl font-semibold text-black dark:text-white">
           Q&amp;A
         </h1>
-        <p className="mt-2 text-sm text-zinc-500">
-          Session: {session ?? "(none)"}
-        </p>
+        <p className="mt-2 text-sm text-zinc-500">Session: {session ?? "(none)"}</p>
 
         {!session && (
           <div className="mt-6 rounded-xl bg-white dark:bg-zinc-900 p-6 shadow-sm">
@@ -108,7 +118,6 @@ export default function QAClient() {
           </div>
         )}
 
-        {/* Chat */}
         <div className="mt-8 rounded-xl bg-white dark:bg-zinc-900 p-6 shadow-sm">
           {messages.length === 0 ? (
             <p className="text-zinc-600 dark:text-zinc-400">
@@ -135,9 +144,7 @@ export default function QAClient() {
           )}
 
           {error && (
-            <p className="mt-4 text-sm text-red-600 dark:text-red-400">
-              {error}
-            </p>
+            <p className="mt-4 text-sm text-red-600 dark:text-red-400">{error}</p>
           )}
 
           <div className="mt-6 flex flex-col gap-3">
