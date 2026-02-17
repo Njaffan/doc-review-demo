@@ -17,13 +17,10 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => ({}));
 
     const question = body?.question;
-    const chunks: IncomingChunk[] = body?.chunks;
+    const chunks = body?.chunks as IncomingChunk[] | undefined;
 
     if (!question || typeof question !== "string") {
-      return NextResponse.json(
-        { error: "Missing question" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Missing question" }, { status: 400 });
     }
 
     if (!Array.isArray(chunks) || chunks.length === 0) {
@@ -33,17 +30,17 @@ export async function POST(req: Request) {
       );
     }
 
-    // 1️⃣ Embed question
+    // 1) Embed the question
     const [qEmbedding] = await embedTexts([question]);
 
-    // 2️⃣ Retrieve relevant chunks
+    // 2) Retrieve top chunks
     const topChunks = retrieveTopChunks(qEmbedding, chunks, 5);
 
     const context = topChunks
       .map((c, i) => `Chunk ${i + 1}:\n${c.text}`)
       .join("\n\n---\n\n");
 
-    // 3️⃣ Grounded answer
+    // 3) Grounded answer prompt
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
