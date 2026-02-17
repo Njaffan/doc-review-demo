@@ -1,32 +1,20 @@
 import { NextResponse } from "next/server";
 import { generateIdentifiedIssues } from "@/lib/openai";
-import { getSession } from "@/lib/sessionStore";
 
 export const runtime = "nodejs";
 
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
-    const session = body?.session;
+    const text = body?.text;
 
-    if (!session || typeof session !== "string") {
-      return NextResponse.json({ error: "Missing session" }, { status: 400 });
+    if (!text || typeof text !== "string") {
+      return NextResponse.json({ error: "Missing document text" }, { status: 400 });
     }
 
-    const doc = getSession(session);
+    const issues = await generateIdentifiedIssues(text);
 
-    // Guard: must exist + must have extracted text
-    if (!doc || !doc.text) {
-      return NextResponse.json({ error: "Session not found" }, { status: 404 });
-    }
-
-    const issues = await generateIdentifiedIssues(doc.text);
-
-    return NextResponse.json({
-      session,
-      issues,
-      filename: doc.fileName ?? null,
-    });
+    return NextResponse.json({ issues });
   } catch (err: any) {
     return NextResponse.json(
       { error: err?.message || "Issues failed", details: String(err) },

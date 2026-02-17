@@ -1,7 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+
+type StoredChunk = {
+  id: string;
+  start: number;
+  end: number;
+  text: string;
+  embedding: number[];
+};
 
 type Issue = {
   issueType: "Clarity" | "Risk" | "Missing Info" | "Inconsistency";
@@ -9,12 +17,27 @@ type Issue = {
   suggestedImprovement: string;
 };
 
+type StoredDoc = {
+  session: string;
+  fileName: string;
+  text: string;
+  chunks: StoredChunk[];
+  createdAt: number;
+};
+
+function storageKey(session: string) {
+  return `docReview:${session}`;
+}
+
 export default function AnalysisClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const session = searchParams.get("session");
+  const session = useMemo(() => searchParams.get("session"), [searchParams]);
 
   const [fileName, setFileName] = useState<string | null>(null);
+
+  // Loaded/stored doc data
+  const [doc, setDoc] = useState<StoredDoc | null>(null);
 
   // Executive Summary state
   const [summary, setSummary] = useState<string[]>([]);
@@ -26,7 +49,36 @@ export default function AnalysisClient() {
   const [loadingIssues, setLoadingIssues] = useState(false);
   const [issuesError, setIssuesError] = useState<string | null>(null);
 
-  async function handleAnalyze() {
+  // -----------------------------
+  // Load doc from sessionStorage when session param exists
+  // -----------------------------
+  useEffect(() => {
+    if (!session) {
+      setDoc(null);
+      return;
+    }
+
+    try {
+      const raw = sessionStorage.getItem(storageKey(session));
+      if (!raw) {
+        setDoc(null);
+        return;
+      }
+      const parsed = JSON.parse(raw) as StoredDoc;
+      if (!parsed?.text || !Array.isArray(parsed?.chunks)) {
+        setDoc(null);
+        return;
+      }
+      setDoc(parsed);
+    } catch {
+      setDoc(null);
+    }
+  }, [session]);
+
+  // -----------------------------
+  // Upload + store in sessionStorage
+  // -----------------------------
+  async function handleUploadAndAnalyze() {
     const input = document.getElementById("fileUpload") as HTMLInputElement | null;
     const file = input?.files?.[0];
 
@@ -35,7 +87,7 @@ export default function AnalysisClient() {
       return;
     }
 
-    const fd = new FormData(); 
+    const fd = new FormData();
     fd.append("file", file);
 
     const res = await fetch("/api/upload", { method: "POST", body: fd });
@@ -46,12 +98,38 @@ export default function AnalysisClient() {
       return;
     }
 
-    router.push(`/analysis?session=${data.session}`);
+    // Expect upload API to return these fields
+    const newSession = String(data?.session || "").trim();
+    const returnedText = typeof data?.text === "string" ? data.text : "";
+    const returnedChunks = Array.isArray(data?.chunks) ? (data.chunks as StoredChunk[]) : [];
+    const returnedFileName = typeof data?.filename === "string" ? data.filename : file.name;
+
+    if (!newSession || !returnedText || returnedChunks.length === 0) {
+      alert(
+        "Upload succeeded but response was missing text/chunks. Check /api/upload response."
+      );
+      return;
+    }
+
+    const stored: StoredDoc = {
+      session: newSession,
+      fileName: returnedFileName,
+      text: returnedText,
+      chunks: returnedChunks,
+      createdAt: Date.now(),
+    };
+
+    sessionStorage.setItem(storageKey(newSession), JSON.stringify(stored));
+
+    // Navigate to results view
+    router.push(`/analysis?session=${newSession}`);
   }
 
-  // Fetch Executive Summary
+  // -----------------------------
+  // Fetch Executive Summary (send text directly)
+  // -----------------------------
   useEffect(() => {
-    if (!session) return;
+    if (!session || !doc?.text) return;
 
     setLoadingSummary(true);
     setSummaryError(null);
@@ -60,14 +138,13 @@ export default function AnalysisClient() {
     fetch("/api/analyze", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session }),
+      body: JSON.stringify({ text: doc.text }),
     })
       .then(async (res) => {
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data?.error || "Analyze failed");
 
         const raw = String(data.summary || "").trim();
-
         const bullets = raw
           .split("\n")
           .map((l) => l.replace(/^[-•\s]+/, "").trim())
@@ -81,11 +158,13 @@ export default function AnalysisClient() {
         setSummaryError(err?.message || "Failed to generate summary.");
         setLoadingSummary(false);
       });
-  }, [session]);
+  }, [session, doc?.text]);
 
-  // Fetch Identified Issues
+  // -----------------------------
+  // Fetch Identified Issues (send text directly)
+  // -----------------------------
   useEffect(() => {
-    if (!session) return;
+    if (!session || !doc?.text) return;
 
     setLoadingIssues(true);
     setIssuesError(null);
@@ -94,7 +173,7 @@ export default function AnalysisClient() {
     fetch("/api/issues", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session }),
+      body: JSON.stringify({ text: doc.text }),
     })
       .then(async (res) => {
         const data = await res.json().catch(() => ({}));
@@ -108,7 +187,7 @@ export default function AnalysisClient() {
         setIssuesError(err?.message || "Failed to generate issues.");
         setLoadingIssues(false);
       });
-  }, [session]);
+  }, [session, doc?.text]);
 
   // -----------------------
   // UPLOAD MODE
@@ -145,16 +224,20 @@ export default function AnalysisClient() {
             className="w-full cursor-pointer rounded-xl border-2 border-dashed border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-8 text-center hover:border-zinc-400 dark:hover:border-zinc-600 transition"
           >
             <div className="text-lg font-semibold text-black dark:text-white">
-              Drag & drop your file here
+              Drag &amp; drop your file here
+            </div>
+            <div className="mt-2 text-sm text-zinc-500">
+              DOCX only
             </div>
           </label>
 
-          <label
-            htmlFor="fileUpload"
-            className="px-6 py-3 rounded-full bg-black text-white hover:bg-zinc-800 transition cursor-pointer"
+          <button
+            type="button"
+            onClick={() => document.getElementById("fileUpload")?.click()}
+            className="px-6 py-3 rounded-full bg-black text-white hover:bg-zinc-800 transition"
           >
             Select File
-          </label>
+          </button>
 
           {fileName && (
             <>
@@ -163,7 +246,7 @@ export default function AnalysisClient() {
               </p>
 
               <button
-                onClick={handleAnalyze}
+                onClick={handleUploadAndAnalyze}
                 className="mt-2 px-6 py-3 rounded-full bg-black text-white hover:bg-zinc-800 transition"
               >
                 Analyze Document
@@ -178,6 +261,41 @@ export default function AnalysisClient() {
   // -----------------------
   // RESULTS MODE
   // -----------------------
+  if (session && !doc) {
+    return (
+      <div className="min-h-screen flex flex-col items-center bg-zinc-50 dark:bg-black py-20 px-6">
+        <a
+          href="/analysis"
+          className="self-start text-sm text-zinc-600 dark:text-zinc-400 hover:underline"
+        >
+          ← Upload another document
+        </a>
+
+        <h1 className="mt-6 text-3xl font-semibold text-black dark:text-white">
+          Analysis Results
+        </h1>
+
+        <p className="mt-2 text-sm text-zinc-500">Session: {session}</p>
+
+        <div className="mt-10 w-full max-w-3xl bg-white dark:bg-zinc-900 rounded-xl p-8 shadow-sm">
+          <p className="text-red-600 dark:text-red-400">
+            Session data not found in this browser.
+          </p>
+          <p className="mt-2 text-zinc-600 dark:text-zinc-400">
+            Re-upload the document (sessions are stored in your browser only for this demo).
+          </p>
+
+          <a
+            href="/analysis"
+            className="mt-6 inline-block px-6 py-3 rounded-full bg-black text-white hover:bg-zinc-800 transition"
+          >
+            Upload Document
+          </a>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex flex-col items-center bg-zinc-50 dark:bg-black py-20 px-6">
       <a
@@ -192,6 +310,9 @@ export default function AnalysisClient() {
       </h1>
 
       <p className="mt-2 text-sm text-zinc-500">Session: {session}</p>
+      {doc?.fileName && (
+        <p className="mt-1 text-sm text-zinc-500">File: {doc.fileName}</p>
+      )}
 
       {/* Executive Summary */}
       <div className="mt-10 w-full max-w-3xl bg-white dark:bg-zinc-900 rounded-xl p-8 shadow-sm">

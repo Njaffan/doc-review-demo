@@ -1,54 +1,55 @@
 import { NextResponse } from "next/server";
 import { embedTexts, openai } from "@/lib/openai";
 import { retrieveTopChunks } from "@/lib/retrieval";
-import { getSession  } from "@/lib/sessionStore";
+
 export const runtime = "nodejs";
 
+type IncomingChunk = {
+  id: string;
+  start: number;
+  end: number;
+  text: string;
+  embedding: number[];
+};
+
 export async function POST(req: Request) {
-  const body = await req.json().catch(() => ({}));
-  const session = body?.session;
-  const question = body?.question;
+  try {
+    const body = await req.json().catch(() => ({}));
 
-  if (!session || typeof session !== "string") {
-    return NextResponse.json({ error: "Missing session" }, { status: 400 });
-  }
+    const question = body?.question;
+    const chunks: IncomingChunk[] = body?.chunks;
 
-  if (!question || typeof question !== "string") {
-    return NextResponse.json({ error: "Missing question" }, { status: 400 });
-  }
+    if (!question || typeof question !== "string") {
+      return NextResponse.json(
+        { error: "Missing question" },
+        { status: 400 }
+      );
+    }
 
-  const doc = getSession(session);
-  if (!doc) {
-    return NextResponse.json({ error: "Session not found" }, { status: 404 });
-  }
+    if (!Array.isArray(chunks) || chunks.length === 0) {
+      return NextResponse.json(
+        { error: "Missing document chunks" },
+        { status: 400 }
+      );
+    }
 
-if (!doc.text || !doc.chunks || doc.chunks.length === 0) {
-  return NextResponse.json(
-    { error: "Session missing document text/chunks" },
-    { status: 404 }
-  );
-}
+    // 1️⃣ Embed question
+    const [qEmbedding] = await embedTexts([question]);
 
+    // 2️⃣ Retrieve relevant chunks
+    const topChunks = retrieveTopChunks(qEmbedding, chunks, 5);
 
+    const context = topChunks
+      .map((c, i) => `Chunk ${i + 1}:\n${c.text}`)
+      .join("\n\n---\n\n");
 
-
-  // 1) Embed the question
-  const [qEmbedding] = await embedTexts([question]);
-
-  // 2) Retrieve top chunks
-  const topChunks = retrieveTopChunks(qEmbedding, doc.chunks, 5);
-
-  const context = topChunks
-    .map((c, i) => `Chunk ${i + 1}:\n${c.text}`)
-    .join("\n\n---\n\n");
-
-  // 3) Grounded answer prompt
-  const response = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
-    messages: [
-      {
-  role: "system",
-  content: `
+    // 3️⃣ Grounded answer
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: `
 You are a document QA system.
 
 You MUST answer using only the provided context.
@@ -58,29 +59,31 @@ If the answer is not explicitly stated in the context, respond exactly with:
 Do not infer.
 Do not assume.
 Do not use outside knowledge.
-Quote exact phrases when helpful.
 Be concise.
 `,
-},
+        },
+        {
+          role: "user",
+          content: `CONTEXT:\n${context}\n\nQUESTION:\n${question}`,
+        },
+      ],
+    });
 
-      {
-        role: "user",
-        content: `CONTEXT:\n${context}\n\nQUESTION:\n${question}`,
-      },
-    ],
-  });
+    const answer = response.choices[0]?.message?.content || "";
 
-  const answer = response.choices[0]?.message?.content || "";
-
-  return NextResponse.json({
-    session,
-    question,
-    answer,
-    sources: topChunks.map((c) => ({
-      id: c.id,
-      start: c.start,
-      end: c.end,
-      preview: c.text.slice(0, 220),
-    })),
-  });
+    return NextResponse.json({
+      answer: answer.trim(),
+      sources: topChunks.map((c) => ({
+        id: c.id,
+        start: c.start,
+        end: c.end,
+        preview: c.text.slice(0, 220),
+      })),
+    });
+  } catch (err: any) {
+    return NextResponse.json(
+      { error: err?.message || "Q&A failed", details: String(err) },
+      { status: 500 }
+    );
+  }
 }

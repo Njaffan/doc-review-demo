@@ -10,26 +10,80 @@ type ChatMsg = {
   ts: number;
 };
 
+type StoredChunk = {
+  id: string;
+  start: number;
+  end: number;
+  text: string;
+  embedding: number[];
+};
+
+type StoredDoc = {
+  session: string;
+  fileName: string;
+  text: string;
+  chunks: StoredChunk[];
+  createdAt: number;
+};
+
+function storageKey(session: string) {
+  return `docReview:${session}`;
+}
+
 export default function QAClient() {
   const searchParams = useSearchParams();
   const session = useMemo(() => searchParams.get("session"), [searchParams]);
 
+  const [doc, setDoc] = useState<StoredDoc | null>(null);
+
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState<ChatMsg[]>([]);
-
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Load doc from sessionStorage using the SAME key as AnalysisClient
   useEffect(() => {
     setMessages([]);
     setError(null);
     setQuestion("");
+
+    if (!session) {
+      setDoc(null);
+      return;
+    }
+
+    try {
+      const raw = sessionStorage.getItem(storageKey(session));
+      if (!raw) {
+        setDoc(null);
+        return;
+      }
+      const parsed = JSON.parse(raw) as StoredDoc;
+
+      if (
+        !parsed?.text ||
+        !Array.isArray(parsed?.chunks) ||
+        parsed.chunks.length === 0
+      ) {
+        setDoc(null);
+        return;
+      }
+
+      setDoc(parsed);
+    } catch {
+      setDoc(null);
+    }
   }, [session]);
 
   async function ask() {
     const q = question.trim();
+
     if (!session) {
       setError("Missing session in URL.");
+      return;
+    }
+    if (!doc?.chunks || doc.chunks.length === 0) {
+      setError("Missing document data. Go back and re-upload.");
       return;
     }
     if (!q) return;
@@ -45,7 +99,7 @@ export default function QAClient() {
       const res = await fetch("/api/qa", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session, question: q }),
+        body: JSON.stringify({ question: q, chunks: doc.chunks }),
       });
 
       const data = await res.json().catch(() => ({}));
@@ -57,11 +111,7 @@ export default function QAClient() {
         (typeof data?.text === "string" && data.text) ||
         "";
 
-      if (!answer.trim()) {
-        throw new Error(
-          "API returned no answer. Check /api/qa response JSON field name (expected: answer)."
-        );
-      }
+      if (!answer.trim()) throw new Error("API returned no answer.");
 
       const botMsg: ChatMsg = {
         role: "assistant",
@@ -93,7 +143,6 @@ export default function QAClient() {
           ← Back to Analysis
         </a>
 
-        {/* ✅ Avatar goes INSIDE the return */}
         <div className="mt-6 flex flex-col items-center">
           <Image
             src="/avatar.png"
@@ -105,23 +154,24 @@ export default function QAClient() {
           />
         </div>
 
-        <h1 className="mt-6 text-3xl font-semibold text-black dark:text-white">
+        <h1 className="mt-6 text-3xl font-semibold text-black dark:text-white text-center">
           Q&amp;A
         </h1>
-        <p className="mt-2 text-sm text-zinc-500">Session: {session ?? "(none)"}</p>
 
         {!session && (
-          <div className="mt-6 rounded-xl bg-white dark:bg-zinc-900 p-6 shadow-sm">
-            <p className="text-zinc-700 dark:text-zinc-300">
-              No session provided. Go back to Analysis and click “Go to Q&amp;A”.
-            </p>
-          </div>
+          <p className="mt-3 text-red-600 text-center">Missing session in URL</p>
+        )}
+
+        {session && !doc && (
+          <p className="mt-3 text-red-600 text-center">
+            Session not found in this browser. Re-upload the document.
+          </p>
         )}
 
         <div className="mt-8 rounded-xl bg-white dark:bg-zinc-900 p-6 shadow-sm">
           {messages.length === 0 ? (
             <p className="text-zinc-600 dark:text-zinc-400">
-              Ask a question about the uploaded document (summary + issues).
+              Ask a question about the uploaded document.
             </p>
           ) : (
             <div className="space-y-4">
@@ -137,14 +187,18 @@ export default function QAClient() {
                   <div className="text-xs mb-1 text-zinc-500">
                     {m.role === "user" ? "You" : "Assistant"}
                   </div>
-                  <div className="whitespace-pre-wrap leading-relaxed">{m.content}</div>
+                  <div className="whitespace-pre-wrap leading-relaxed">
+                    {m.content}
+                  </div>
                 </div>
               ))}
             </div>
           )}
 
           {error && (
-            <p className="mt-4 text-sm text-red-600 dark:text-red-400">{error}</p>
+            <p className="mt-4 text-sm text-red-600 dark:text-red-400">
+              {error}
+            </p>
           )}
 
           <div className="mt-6 flex flex-col gap-3">
@@ -154,13 +208,13 @@ export default function QAClient() {
               onKeyDown={onKeyDown}
               placeholder="Type your question… (Enter to send, Shift+Enter for a new line)"
               className="w-full min-h-[96px] rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-3 text-zinc-900 dark:text-zinc-100 outline-none focus:ring-2 focus:ring-zinc-400 dark:focus:ring-zinc-700"
-              disabled={!session || loading}
+              disabled={!session || !doc || loading}
             />
 
             <div className="flex items-center gap-3">
               <button
                 onClick={ask}
-                disabled={!session || loading || !question.trim()}
+                disabled={!session || !doc || loading || !question.trim()}
                 className="px-6 py-3 rounded-full bg-black text-white hover:bg-zinc-800 transition disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? "Asking…" : "Ask"}
@@ -180,9 +234,8 @@ export default function QAClient() {
           </div>
         </div>
 
-        <div className="mt-6 text-xs text-zinc-500">
-          Tip: If you want the assistant to reference the exact issues table, ask things like:
-          “Explain the top 3 risks and propose improved wording.”
+        <div className="mt-6 text-xs text-zinc-500 text-center">
+          Tip: Ask things like “Summarize the top risks and propose improved wording.”
         </div>
       </div>
     </div>
